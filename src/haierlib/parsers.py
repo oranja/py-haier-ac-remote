@@ -1,83 +1,84 @@
-import construct
-from .types import *
-
-state_struct = construct.Struct(
-    'start' / construct.Int16ub,         # TODO assert == 65535
-    'start_magic' / construct.Int16ub,  # TODO assert == 8704
-    construct.Padding(8),
-    'current_temp' / construct.Int16ub,         
-    construct.Padding(8),
-    'mode' / construct.Int16ub,
-    'fan_speed' / construct.Int16ub,
-    'limits' / construct.Int16ub,
-    'power' / construct.Int16ub,
-    'health' / construct.Int16ub,
-    construct.Padding(2),
-    'target_temp' / construct.Int16ub       # From 16!
+from construct import (
+    Bytes,
+    Const,
+    Container,
+    Enum,
+    Int8ub,
+    Int16ub,
+    Int32ub,
+    Padding,
+    RawCopy,
+    Struct,
+    this,
 )
 
-def get_cmd_struct(data_len):
-    return construct.Struct(
-        'data_magic' / construct.Int16ub,
-        'type' / construct.Int8ub,
-        'data' / construct.Array(data_len - 4, construct.Int8ub),
-    ) 
+from .types import FanSpeed, Limits, Mode, Response, State
 
-resp_struct = construct.Struct(
-    construct.Padding(2),
-    'start' / construct.Int16ub,     # TODO assert
-    construct.Padding(4),
-    construct.Padding(16),
-    construct.Padding(16),
-
-    # MAC address
-    'mac_address' / construct.Array(12, construct.Int8ub),
-    construct.Padding(4),
-    construct.Padding(16),
-    
-    # Command sequence number and length
-    construct.Padding(3),
-    'seq' / construct.Int8ub,
-    construct.Padding(3),
-    'cmd_length' / construct.Int8ub,
-
-    # Dynamic command array
-    'cmd' / get_cmd_struct(construct.this._.cmd_length),
-    'chksum' / construct.Int8ub
+state_struct = Struct(
+    Const(0xFFFF, Int16ub) * "start",
+    Const(0x2200, Int16ub) * "state (magic)",
+    Padding(8),
+    "current_temperature" / Int16ub,
+    Padding(8),
+    "mode" / Enum(Int16ub, Mode),
+    "fan_speed" / Enum(Int16ub, FanSpeed),
+    "limits" / Enum(Int16ub, Limits),
+    "power" / Int16ub,
+    "health" / Int16ub,
+    Padding(2),
+    "target_temperature" / Int16ub,  # From 16!
 )
 
-# TODO asserts, verify start magic, verify checksum
+response_struct = Struct(
+    Padding(2),
+    Const(0x27, Int8ub) * "magic",
+    Const(0x15, Int8ub) * "type: response",
+    Padding(4),
+    Padding(4),
+    # MAC address represented in nibbles
+    # TODO: Custom adapter to get 6 bytes?
+    "mac_address" / Bytes(12),
+    Padding(2),
+    "seq" / Int32ub,
+    "payload_length" / Int32ub,
+    # Dynamic payload array
+    "payload"
+    / RawCopy(
+        Struct(
+            Const(0xFFFF, Int16ub) * "payload magic",
+            "type" / Int8ub,
+            "data" / Bytes(this._.payload_length - 4),
+        )
+    ),
+    "checksum" / Int8ub,
+)
+
+# TODO verify checksum
 # TODO check execute() on parsers.ts for verifications
 
-def parse_state(resp, state=None):
-    if resp.cmd.type != 34:
-        return
-    
-    # Create a new state
-    if not state:
-        state = State()
-
+# Expects the payload from response
+def parse_state(raw_payload: bytes) -> State:
     # Get the constructed data
-    state_st = state_struct.parse(get_cmd_struct(resp.cmd_length).build({
-        'data_magic': resp.cmd.data_magic, 
-        'type': resp.cmd.type, 
-        'data': resp.cmd.data
-    }))
+    state: Container = state_struct.parse(raw_payload)
 
     # Adjust and convert to State object
-    state.update(
-        current_temp=state_st.current_temp,
-        target_temp=state_st.target_temp + 16,
-        fan_speed=FanSpeed(state_st.fan_speed),
-        mode=Mode(state_st.mode),
-        health=(state_st.health % 2 != 0),
-        limits=Limits(state_st.limits),
-        power=(state_st.power % 2 != 0)
+    return State(
+        current_temperature=state.current_temperature,
+        target_temperature=state.target_temperature + 16,
+        fan_speed=state.fan_speed,
+        mode=state.mode,
+        health=bool(state.health),
+        limits=state.limits,
+        power=bool(state.power),
     )
 
-    return state
+
+def parse_response(raw_response: bytes) -> Response:
+    response: Container = response_struct.parse(raw_response)
+    state: State = parse_state(response.payload.data)
+    mac_address = hex_str_to_bytes(response.mac_address.decode("ascii"))
+    return Response(mac_address=mac_address, sequence_number=response.seq, state=state)
 
 
-def parse_resp(data):
-    resp = resp_struct.parse(data)
-    return parse_state(resp)
+def hex_str_to_bytes(hex_str: str) -> bytes:
+    return bytes.fromhex(hex_str)
