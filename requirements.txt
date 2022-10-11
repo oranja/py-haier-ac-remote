@@ -1,3 +1,4 @@
 black==22.10.0
 construct-typing~=0.5.2
 pip-chill>=1.0.1
+pytest-asyncio~=0.19
