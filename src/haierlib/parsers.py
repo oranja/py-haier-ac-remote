@@ -1,5 +1,6 @@
 from construct import (
     Bytes,
+    Checksum,
     Const,
     Container,
     Enum,
@@ -50,10 +51,9 @@ response_struct = Struct(
             "data" / Bytes(this._.payload_length - 4),
         )
     ),
-    "checksum" / Int8ub,
+    "checksum" / Checksum(Int8ub, lambda data: sum(data[2:]) & 0xFF, this.payload.data),
 )
 
-# TODO verify checksum
 # TODO check execute() on parsers.ts for verifications
 
 # Expects the payload from response

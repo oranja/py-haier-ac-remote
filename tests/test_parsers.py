@@ -1,4 +1,4 @@
-from construct import ConstructError
+from construct import ChecksumError, ConstructError
 from haierlib.parsers import parse_response, parse_state
 from haierlib.types import FanSpeed, Limits, Mode, Response, State
 from pytest import raises
@@ -34,6 +34,11 @@ class TestParsers:
     async def test_parse_response_corrupt_payload_raises(self) -> None:
         bad_payload = self.response_payload[2:]
         with raises(ConstructError):
+            parse_response(bad_payload)
+
+    async def test_parse_response_bad_checksum_raises(self) -> None:
+        bad_payload = self.response_payload[:-1] + b"\x00"
+        with raises(ChecksumError):
             parse_response(bad_payload)
 
     async def test_parse_response_state(self) -> None:
