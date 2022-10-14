@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from construct import Adapter, Bytes, Container
+
 
 class Limits(Enum):
     OFF = 0
@@ -67,3 +69,33 @@ class Response:
     mac_address: bytes
     sequence_number: int
     state: State
+
+
+# Note:
+# Having the encoded ("wire") format being more wasteful than the decoded format
+# might make it seem as if encoding and decoding are mistakenly reversed.
+# This is due to the Haier AC protocol making an odd choice
+# to encode a 6-bytes long MAC address into a 12-bytes long
+# string with its hexadecimal representation.
+
+
+class HexStringAdapter(Adapter):
+    """Converts an ASCII string representing a sequence of nibbles
+    in hexadecimal format, into an actual sequence of bytes
+    (and vice versa).
+
+    e.g.: the sequence `30 38 31 30 41 34 0a` on the wire
+          - which is '0810A4' in ASCII encoding -
+          turns into the byte sequence `08 10 a4`.
+    """
+
+    def _decode(self, obj: bytes, context: Container, path: str) -> bytes:
+        hex_str = obj.decode("ascii")
+        return bytes.fromhex(hex_str)
+
+    def _encode(self, obj: bytes, context: Container, path: str) -> bytes:
+        hex_str = obj.hex()
+        return hex_str.encode("ascii")
+
+
+HexStringMacAddressAdapter = lambda: HexStringAdapter(Bytes(12))

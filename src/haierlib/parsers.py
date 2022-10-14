@@ -13,7 +13,7 @@ from construct import (
     this,
 )
 
-from .types import FanSpeed, Limits, Mode, Response, State
+from .types import FanSpeed, HexStringMacAddressAdapter, Limits, Mode, Response, State
 
 state_struct = Struct(
     Const(0xFFFF, Int16ub) * "start",
@@ -36,9 +36,8 @@ response_struct = Struct(
     Const(0x15, Int8ub) * "type: response",
     Padding(4),
     Padding(4),
-    # MAC address represented in nibbles
-    # TODO: Custom adapter to get 6 bytes?
-    "mac_address" / Bytes(12),
+    # MAC address nibbles encoded into a string
+    "mac_address" / HexStringMacAddressAdapter(),
     Padding(2),
     "seq" / Int32ub,
     "payload_length" / Int32ub,
@@ -76,8 +75,9 @@ def parse_state(raw_payload: bytes) -> State:
 def parse_response(raw_response: bytes) -> Response:
     response: Container = response_struct.parse(raw_response)
     state: State = parse_state(response.payload.data)
-    mac_address = hex_str_to_bytes(response.mac_address.decode("ascii"))
-    return Response(mac_address=mac_address, sequence_number=response.seq, state=state)
+    return Response(
+        mac_address=response.mac_address, sequence_number=response.seq, state=state
+    )
 
 
 def hex_str_to_bytes(hex_str: str) -> bytes:
